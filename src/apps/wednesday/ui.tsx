@@ -9,6 +9,8 @@ interface Message {
   timestamp: Date
 }
 
+/*
+
 export default function WednesdayUI() {
   const [command, setCommand] = useState('')
   const [messages, setMessages] = useState<Message[]>([
@@ -57,6 +59,107 @@ export default function WednesdayUI() {
     } else {
       const aiPlaceholder: Message = { id: (Date.now() + 1).toString(), type: 'assistant', content: `Processing: ${currentCommand}\n\n(Placeholder AI response – model integration pending)`, timestamp: new Date() }
       setMessages(prev => [...prev, aiPlaceholder])
+    }
+  }
+*/
+
+export default function WednesdayUI() {
+  const [command, setCommand] = useState('')
+  const [messages, setMessages] = useState<Message[]>([
+    { id: '1', type: 'system', content: 'Wednesday initialized. How can I help you today?', timestamp: new Date() }
+  ])
+  const [currentDir, setCurrentDir] = useState<string>('~')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  function updateDirectoryOnCommand(cmdLine: string, terminalOutput?: string) {
+    const trimmed = cmdLine.trim(); if (!trimmed) return
+    const parts = trimmed.split(/\s+/); const cmd = parts[0]
+    if (cmd === 'cd') {
+      const arg = parts[1]
+      if (!arg || arg === '~' || arg === '/') { setCurrentDir('~'); return }
+      if (arg === '..') { if (currentDir === '~') return; const segs = currentDir.replace(/^~\/?/, '').split('/').filter(Boolean); segs.pop(); setCurrentDir(segs.length ? '~/' + segs.join('/') : '~'); return }
+      if (arg.startsWith('/')) { const abs = arg.replace(/^\/+/, ''); setCurrentDir(abs ? '~/' + abs : '~') } else { setCurrentDir(currentDir === '~' ? `~/${arg}` : `${currentDir}/${arg}`) }
+      return
+    }
+    if (cmd === 'pwd' && terminalOutput) {
+      const out = terminalOutput.trim(); if (!out) return
+      if (out === '/' || out === '~') { setCurrentDir('~'); return }
+      if (out.startsWith('/')) { const norm = out.slice(1); setCurrentDir(norm ? '~/' + norm : '~') } else { setCurrentDir(out.startsWith('~') ? out : '~/' + out) }
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault(); if (!command.trim()) return
+    const userMsg: Message = { id: Date.now().toString(), type: 'user', content: command, timestamp: new Date() }
+    setMessages(prev => [...prev, userMsg])
+    const currentCommand = command; setCommand('')
+    if (isTerminalCommand(currentCommand)) {
+      try {
+        const result = await terminalBridge.executeCommand(currentCommand)
+        updateDirectoryOnCommand(currentCommand, result.output)
+        const assistantMsg: Message = { id: (Date.now() + 1).toString(), type: 'assistant', content: result.output || '(No output)', timestamp: new Date() }
+        setMessages(prev => [...prev, assistantMsg])
+      } catch (err) {
+        const errorMsg: Message = { id: (Date.now() + 1).toString(), type: 'system', content: 'Error executing command: ' + String(err), timestamp: new Date() }
+        setMessages(prev => [...prev, errorMsg])
+      }
+    } else {
+      const loadingId = (Date.now() + 1).toString()
+      const loadingMsg: Message = { id: loadingId, type: 'system', content: `Thinking...`, timestamp: new Date() }
+      setMessages(prev => [...prev, loadingMsg])
+
+      try {
+        const ollamaMessages = messages
+          .filter(m => m.type !== 'system')
+          .map(m => ({
+            role: m.type === 'user' ? 'user' : 'assistant',
+            content: m.content
+          }))
+        
+        ollamaMessages.push({ role: 'user', content: currentCommand })
+
+        const response = await fetch('http://localhost:11434/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gemma4:31b-cloud', // Use the model already installed to save space
+            messages: ollamaMessages,
+            stream: false
+          })
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => null)
+          throw new Error(errorData?.error || `HTTP error! status: ${response.status}`)
+        }
+
+        const data = await response.json()
+        
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== loadingId)
+          return [...filtered, {
+            id: (Date.now() + 2).toString(),
+            type: 'assistant',
+            content: data.message?.content || 'No response from model',
+            timestamp: new Date()
+          }]
+        })
+      } catch (err) {
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== loadingId)
+          return [...filtered, {
+            id: (Date.now() + 2).toString(),
+            type: 'system',
+            content: `Error connecting to Ollama: ${err instanceof Error ? err.message : String(err)}. Make sure Ollama is running locally.`,
+            timestamp: new Date()
+          }]
+        })
+      }
     }
   }
 
