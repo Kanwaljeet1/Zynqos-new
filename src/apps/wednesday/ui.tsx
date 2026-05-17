@@ -109,7 +109,7 @@ export default function WednesdayUI() {
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey) handleSubmit(e as any) }
+  function handleKeyDown(e: React.KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey) handleSubmit(e as unknown as React.FormEvent) }
   function focusInput() { inputRef.current?.focus() }
 
   function insertAtSign() {
