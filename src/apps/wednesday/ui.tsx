@@ -55,12 +55,61 @@ export default function WednesdayUI() {
         setMessages(prev => [...prev, errorMsg])
       }
     } else {
-      const aiPlaceholder: Message = { id: (Date.now() + 1).toString(), type: 'assistant', content: `Processing: ${currentCommand}\n\n(Placeholder AI response – model integration pending)`, timestamp: new Date() }
-      setMessages(prev => [...prev, aiPlaceholder])
+      const loadingId = (Date.now() + 1).toString()
+      const loadingMsg: Message = { id: loadingId, type: 'system', content: `Thinking...`, timestamp: new Date() }
+      setMessages(prev => [...prev, loadingMsg])
+
+      try {
+        const ollamaMessages = messages
+          .filter(m => m.type !== 'system')
+          .map(m => ({
+            role: m.type === 'user' ? 'user' : 'assistant',
+            content: m.content
+          }))
+        
+        ollamaMessages.push({ role: 'user', content: currentCommand })
+
+        const response = await fetch('http://localhost:11434/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gemma4:31b-cloud', // Use the model already installed to save space
+            messages: ollamaMessages,
+            stream: false
+          })
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => null)
+          throw new Error(errorData?.error || `HTTP error! status: ${response.status}`)
+        }
+
+        const data = await response.json()
+        
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== loadingId)
+          return [...filtered, {
+            id: (Date.now() + 2).toString(),
+            type: 'assistant',
+            content: data.message?.content || 'No response from model',
+            timestamp: new Date()
+          }]
+        })
+      } catch (err) {
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== loadingId)
+          return [...filtered, {
+            id: (Date.now() + 2).toString(),
+            type: 'system',
+            content: `Error connecting to Ollama: ${err instanceof Error ? err.message : String(err)}. Make sure Ollama is running locally.`,
+            timestamp: new Date()
+          }]
+        })
+      }
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey) handleSubmit(e as any) }
+  function handleKeyDown(e: React.KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey) handleSubmit(e as unknown as React.FormEvent) }
   function focusInput() { inputRef.current?.focus() }
 
   function insertAtSign() {
